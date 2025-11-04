@@ -140,6 +140,29 @@ public class Metadata {
 		return ORIENTATION_UNDEFINED;
 	}
 
+	/**
+	 * Safely extracts a String value from a TiffField, handling both String and String[] types.
+	 * Some images store GPS reference fields as String arrays instead of single Strings.
+	 *
+	 * @param field The TiffField to extract the value from
+	 * @return The string value, or null if extraction fails
+	 */
+	private static String getStringValue(TiffField field) {
+		if (field == null) return null;
+		try {
+			Object value = field.getValue();
+			if (value instanceof String) {
+				return (String) value;
+			} else if (value instanceof String[]) {
+				String[] arr = (String[]) value;
+				return arr.length > 0 ? arr[0] : null;
+			}
+		} catch (Exception e) {
+			// Return null if we can't extract the value
+		}
+		return null;
+	}
+
 	private static void gps(JpegImageMetadata jpegMetadata, Struct info) throws ImageReadException {
 		CFMLEngine eng = CFMLEngineFactory.getInstance();
 		Struct gps = eng.getCreationUtil().createStruct();
@@ -149,12 +172,17 @@ public class Metadata {
 		Double longitude = null;
 		Double latitude = null;
 		if (null != exifMetadata) {
-			final TiffImageMetadata.GPSInfo gpsInfo = exifMetadata.getGPS();
-			if (null != gpsInfo) {
-				// final String gpsDescription = gpsInfo.toString();
-				longitude = gpsInfo.getLongitudeAsDegreesEast();
-				latitude = gpsInfo.getLatitudeAsDegreesNorth();
+			try {
+				final TiffImageMetadata.GPSInfo gpsInfo = exifMetadata.getGPS();
+				if (null != gpsInfo) {
+					// final String gpsDescription = gpsInfo.toString();
+					longitude = gpsInfo.getLongitudeAsDegreesEast();
+					latitude = gpsInfo.getLatitudeAsDegreesNorth();
 
+				}
+			} catch (ImageReadException e) {
+				// GPS info parsing failed (e.g., GPS fields stored as arrays instead of strings)
+				// Continue with manual field extraction below
 			}
 		}
 
@@ -164,32 +192,34 @@ public class Metadata {
 		final TiffField gpsLongitudeRefField = jpegMetadata.findEXIFValueWithExactMatch(GpsTagConstants.GPS_TAG_GPS_LONGITUDE_REF);
 		final TiffField gpsLongitudeField = jpegMetadata.findEXIFValueWithExactMatch(GpsTagConstants.GPS_TAG_GPS_LONGITUDE);
 		if (gpsLatitudeRefField != null && gpsLatitudeField != null && gpsLongitudeRefField != null && gpsLongitudeField != null) {
-			// all of these values are strings.
-			final String gpsLatitudeRef = (String) gpsLatitudeRefField.getValue();
+			// GPS reference fields may be strings or string arrays, handle both cases
+			final String gpsLatitudeRef = getStringValue(gpsLatitudeRefField);
 			final RationalNumber gpsLatitude[] = (RationalNumber[]) (gpsLatitudeField.getValue());
-			final String gpsLongitudeRef = (String) gpsLongitudeRefField.getValue();
+			final String gpsLongitudeRef = getStringValue(gpsLongitudeRefField);
 			final RationalNumber gpsLongitude[] = (RationalNumber[]) gpsLongitudeField.getValue();
 
-			info.setEL("GPS Latitude", gpsLatitude[0].toDisplayString() + "\"" + gpsLatitude[1].toDisplayString() + "'" + gpsLatitude[2].toDisplayString());
+			if (gpsLatitudeRef != null && gpsLongitudeRef != null) {
+				info.setEL("GPS Latitude", gpsLatitude[0].toDisplayString() + "\"" + gpsLatitude[1].toDisplayString() + "'" + gpsLatitude[2].toDisplayString());
 
-			info.setEL("GPS Latitude Ref", gpsLatitudeRef);
-			Struct sct = eng.getCreationUtil().createStruct();
-			gps.setEL("latitude", sct);
-			sct.setEL("degrees", gpsLatitude[0].doubleValue());
-			sct.setEL("minutes", gpsLatitude[1].doubleValue());
-			sct.setEL("seconds", gpsLatitude[2].doubleValue());
-			sct.setEL("ref", gpsLatitudeRef);
-			sct.setEL("decimal", latitude);
+				info.setEL("GPS Latitude Ref", gpsLatitudeRef);
+				Struct sct = eng.getCreationUtil().createStruct();
+				gps.setEL("latitude", sct);
+				sct.setEL("degrees", gpsLatitude[0].doubleValue());
+				sct.setEL("minutes", gpsLatitude[1].doubleValue());
+				sct.setEL("seconds", gpsLatitude[2].doubleValue());
+				sct.setEL("ref", gpsLatitudeRef);
+				sct.setEL("decimal", latitude);
 
-			info.setEL("GPS Longitude", gpsLongitude[0].toDisplayString() + "\"" + gpsLongitude[1].toDisplayString() + "'" + gpsLongitude[2].toDisplayString());
-			info.setEL("GPS Longitude Ref", gpsLongitudeRef);
-			sct = eng.getCreationUtil().createStruct();
-			gps.setEL("longitude", sct);
-			sct.setEL("degrees", gpsLongitude[0].doubleValue());
-			sct.setEL("minutes", gpsLongitude[1].doubleValue());
-			sct.setEL("seconds", gpsLongitude[2].doubleValue());
-			sct.setEL("ref", gpsLongitudeRef);
-			sct.setEL("decimal", longitude);
+				info.setEL("GPS Longitude", gpsLongitude[0].toDisplayString() + "\"" + gpsLongitude[1].toDisplayString() + "'" + gpsLongitude[2].toDisplayString());
+				info.setEL("GPS Longitude Ref", gpsLongitudeRef);
+				sct = eng.getCreationUtil().createStruct();
+				gps.setEL("longitude", sct);
+				sct.setEL("degrees", gpsLongitude[0].doubleValue());
+				sct.setEL("minutes", gpsLongitude[1].doubleValue());
+				sct.setEL("seconds", gpsLongitude[2].doubleValue());
+				sct.setEL("ref", gpsLongitudeRef);
+				sct.setEL("decimal", longitude);
+			}
 		}
 	}
 
